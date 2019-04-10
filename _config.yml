@@ -20,8 +20,8 @@ title                    : crusher blog
 title_separator          : "-"
 name                     : "Your Name"
 description              : "An amazing website."
-url                      : https://chryzsh.github.io
-baseurl                  : /crusher blog
+url                      : "https://chryzsh.github.io"
+baseurl                  : "/crusher-blog"
 repository               : "chryzsh/chryzsh.github.io"
 teaser                   : # path of fallback teaser image, e.g. "/assets/images/500x300.png"
 logo                     : # path of logo image to display in the masthead, e.g. "/assets/images/88x88.png"
