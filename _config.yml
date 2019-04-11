@@ -108,7 +108,7 @@ analytics:
 author:
   name   : "crusher"
   avatar : "/assets/img/windows_logo.png"
-  bio    : "Hacking Active Directory. Also, I have Trust issues."
+  bio    : "I have Trust issues."
   twitter:        : "_chryzsh"
   location         : "Somewhere in your AD"
   email  : # optional
@@ -219,7 +219,7 @@ sass:
 
 
 # Outputting
-permalink: /:categories/:title/
+permalink: /:title/
 paginate: 5 # amount of posts to show
 paginate_path: /page:num/
 timezone: # https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
