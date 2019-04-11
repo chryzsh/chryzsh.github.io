@@ -88,7 +88,7 @@ facebook:
   username               :
   app_id                 :
   publisher              :
-og_image                 : "/assets/img/winlogo.png"
+og_image                 : "/assets/img/winlogo2.png"
 # - https://developers.google.com/structured-data/customize/social-profiles
 social:
   type                   : # Person or Organization (defaults to Person)
@@ -106,7 +106,7 @@ analytics:
 # Site Author
 author:
   name   : "crusher"
-  avatar : "/assets/img/winlogo.png"
+  avatar : "/assets/img/winlogo2.png"
   bio    : "I have Trust issues."
   location         : "Somewhere in your forest"
   email  : # optional
