@@ -1,4 +1,9 @@
-# Combining NTLM Relaying and Kerberos delegation
+---
+layout: single
+classes: wide
+title:  "Combining NTLM Relaying and Kerberos delegation"
+date:   2019-04-14 18:08:00 +0200
+---
 
 ![](https://danlebrero.com/images/cerberus.jpg)
 
