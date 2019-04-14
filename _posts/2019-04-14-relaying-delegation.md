@@ -9,14 +9,14 @@ date:   2019-04-14 18:08:00 +0200
 
 I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerberos, and his articles are awesome. It did however take me a while to understand what actually goes on in the Kerberos delegation attack, so I've made an attempt to explain the details of it and how to execute the attack. I also have done a few experiments on what to do with it once it has been successfully executed. As this is all based on his article [The worst of both worlds: Combining NTLM Relaying and Kerberos delegation](https://dirkjanm.io/worst-of-both-worlds-ntlm-relaying-and-kerberos-delegation/), I recommend reading that first.
 
-## What do we achieve from this attack?
+# What do we achieve from this attack?
 
 - Remote code execution on a domain joined computer
 - Local privilege escalation on said host, with access as SYSTEM
 - Access to a domain machine account
   - Can be used for domain enumeration (Bloodhound, PingCastle, Powerview, etc.)
 
-## Prerequisites
+# Prerequisites
 
 - Install [impacket](https://github.com/SecureAuthCorp/impacket) and [mitm6](https://github.com/fox-it/mitm6)
 - Install the required kerberos packages
@@ -24,7 +24,7 @@ I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerb
 - `pip install service-identity`
 - To replicate it in wer lab we will need LDAP over TLS (LDAPS). See [installation guide](https://gist.github.com/magnetikonline/0ccdabfec58eb1929c997d22e7341e45) for setting up certificates on domain controller.
 
-## Requirements
+# Requirements
 
 - A Linux host on the network. The attack is very hard to execute without a host we have full control over.
 - Domain users must be allowed to create machine accounts in the domain.
@@ -33,7 +33,7 @@ I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerb
 - IPv6 must be enabled in the network
 - We can replicate the attack by signing in and out of Windows for every try, assuming a lab scenario where we control the target. In a real scenario we would have to force a reboot somehow, or show up early and wait for people to turn on their computers.
 
-## How does it work?
+# How does it work?
 
 1. We set up a man-in-the-middle DNS on IPv6 and serve a WPAD proxy configuration file that prompts the victim for authentication to our fake proxy server. That way, when the victim computer boots and starts looking for proxy config, the machine account tries to authenticate to us.
 
@@ -49,9 +49,9 @@ I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerb
 
 7. We use the ticket to access the computer with local admin privileges. The ticket with these privs is only valid on the target box.
 
-## Setup
+# Setup
 
-### Components of the attack
+## Components of the attack
 
 - `lab.local` - AD Domain Name
 - `dc01.lab.local` - AD Domain Controller
@@ -61,7 +61,7 @@ I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerb
   - Dollar sign after the name signifies that it's a machine account
 - `lkys` - Domain Administrator
 
-### mitm6
+## mitm6
 
 Start up the server, specify hostname we want to target and domain.
 
@@ -69,7 +69,7 @@ Start up the server, specify hostname we want to target and domain.
 
 ![](../assets/img/relaydelegation/2019-04-14-12-43-22.png)
 
-### ntlmrelayx
+## ntlmrelayx
 
 Start ntlmrelayx, specify domain controller, delegation attack, disable the SMB server and set the name for a malicious WPAD file that will be generated and served to the target.
 
@@ -79,7 +79,7 @@ Create a machine account is supposedly not allowed over LDAP, it needs LDAP over
 
 ![](../assets/img/relaydelegation/2019-04-14-12-44-15.png)
 
-## Trigger
+# Attack
 
 The only real way to trigger an IPv6 WPAD request is through a user login after a reboot, or reconnects to the network. Once a user is logged in, things should start happening in mitm6 and ntlmrelayx.
 
@@ -159,11 +159,11 @@ If we want to dump the hashes of the target, we can use `secretsdump.py`
 
 ![](../assets/img/relaydelegation/2019-04-14-15-45-07.png)
 
-## Further exploration of the attack
+# Further exploration of the attack
 
 Now we have performed the attack and have gained what we want to achieve; full administrator level privileges on a remote host, acquired from nothing but network access. This is where I go past what dirkjan detailed in his article and into research of my own. If you want to have a deeper understanding of the attack and what's possible to do with it, keep reading.
 
-### A quick look at WMI execution
+## A quick look at WMI execution
 
 Let's take a closer look at getting command execution with `wmiexec.py` by turning on the `-debug` parameter.
 
@@ -177,7 +177,7 @@ Notice how it changes the SPN from CIFs to HOST in an attempt to get a valid SPN
 
 Check Secureauth's article [Kerberos Delegation, SPNs and More... | SecureAuth](https://www.secureauth.com/blog/kerberos-delegation-spns-and-more) for more information about this.
 
-## From Windows
+## Executing the attack from Windows
 
 Now, so far we've only used Linux to perform the post attack operations, but there is a lot to learn from doing this from Windows. I'm doing this from a non-domain joined Windows machine on the network.
 
