@@ -5,33 +5,20 @@ title:  "Combining NTLM Relaying and Kerberos delegation"
 date:   2019-04-14 18:08:00 +0200
 ---
 
+A computer takeover attack through some funky relaying and abuse of Kerberos.
+
 ![](https://danlebrero.com/images/cerberus.jpg)
+
+# Overview
 
 I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerberos, and his articles are awesome. It did however take me a while to understand what actually goes on in the Kerberos delegation attack, so I've made an attempt to explain the details of it and how to execute the attack. I also have done a few experiments on what to do with it once it has been successfully executed. As this is all based on his article [The worst of both worlds: Combining NTLM Relaying and Kerberos delegation](https://dirkjanm.io/worst-of-both-worlds-ntlm-relaying-and-kerberos-delegation/), I recommend reading that first.
 
-# What do we achieve from this attack?
+## What do we achieve from this attack?
 
 - Remote code execution on a domain joined computer
 - Local privilege escalation on said host, with access as SYSTEM
 - Access to a domain machine account
   - Can be used for domain enumeration (Bloodhound, PingCastle, Powerview, etc.)
-
-# Prerequisites
-
-- Install [impacket](https://github.com/SecureAuthCorp/impacket) and [mitm6](https://github.com/fox-it/mitm6)
-- Install the required kerberos packages
-  - `apt install krb5-user cifs-utils`
-- `pip install service-identity`
-- To replicate it in wer lab we will need LDAP over TLS (LDAPS). See [installation guide](https://gist.github.com/magnetikonline/0ccdabfec58eb1929c997d22e7341e45) for setting up certificates on domain controller.
-
-# Requirements
-
-- A Linux host on the network. The attack is very hard to execute without a host we have full control over.
-- Domain users must be allowed to create machine accounts in the domain.
-- Target computer(s) must have proxy configured, with internal IPs set up as exceptions
-- ADCS must be running on the DC with a valid certificate installed.
-- IPv6 must be enabled in the network
-- We can replicate the attack by signing in and out of Windows for every try, assuming a lab scenario where we control the target. In a real scenario we would have to force a reboot somehow, or show up early and wait for people to turn on their computers.
 
 # How does it work?
 
@@ -48,6 +35,25 @@ I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerb
 6. We request a ticket using the machine account that was created where we impersonate a user that has local admin access to  our target computer.
 
 7. We use the ticket to access the computer with local admin privileges. The ticket with these privs is only valid on the target box.
+
+# Prerequisites
+
+- Install [impacket](https://github.com/SecureAuthCorp/impacket) and [mitm6](https://github.com/fox-it/mitm6)
+- Install the required kerberos packages
+  - `apt install krb5-user cifs-utils`
+- `pip install service-identity`
+
+
+# Requirements
+
+- A Linux host on the network. The attack is hard to execute without a host we have full control over.
+- Domain users must be allowed to create machine accounts in the domain.
+- Target computer(s) must have proxy configured, with internal IPs set up as exceptions
+- To replicate it in our lab we will need LDAP over TLS (LDAPS). See [installation guide](https://gist.github.com/magnetikonline/0ccdabfec58eb1929c997d22e7341e45) for setting up certificates on domain controller.
+  - Active Directory Certificate Services (ADCS) must be running on the DC with a valid certificate installed. This enables LDAP over TLS.
+- IPv6 must be enabled in the network
+
+We can replicate the attack by signing in and out of Windows for every try, assuming a lab scenario where we control the target. In a real scenario we would have to force a reboot somehow, or show up early and wait for people to turn on their computers.
 
 # Setup
 
@@ -89,9 +95,12 @@ What happens first is that the target computer starts performing name resolution
 
 ntlmrelayx captures the incoming request and serves a proxy configuration which ask the target for authentication. The target promptly answers with the machine account's NTLMv2 hash (NetNTLMv2). ntlmrelayx then relays the captured credentials to LDAP on the domain controller, uses that to create a new machine account, print the account's name and password and modifies the delegation rights of it.
 
+*We make a note of the username and password for later so it doesn't disappear*
+
 ![](../assets/img/relaydelegation/2019-04-14-13-31-11.png)
 
 Once the attack has been performed, the machine account should show up as a computer in the domain
+
 ![](../assets/img/relaydelegation/2019-04-14-13-33-09.png)
 
 We can see with RSAT that the `LUJCDPUQ$` machine account is allowed to deleagate on the computer object `WS02`. This can be seen in the `PrincipalsAllowedToDelegateToAccount` attribute on the computer object. We can use RSAT to query this
@@ -165,17 +174,17 @@ Now we have performed the attack and have gained what we want to achieve; full a
 
 ## A quick look at WMI execution
 
-Let's take a closer look at getting command execution with `wmiexec.py` by turning on the `-debug` parameter.
+Let's take a closer look at what goes on during command execution with `wmiexec.py` by turning on the `-debug` parameter.
 
     wmiexec.py -k -no-pass -debug ws02.lab.local
 
 ![](../assets/img/relaydelegation/2019-04-14-15-25-28.png)
 
-Hold on a sec! The `cifs` SPN is only valid for access to file shares isn't it? So how come we can execute WMI queries all of a sudden? Apparently, the `sname` field is not signed or protected by any means, so we can basically change it to the SPN we want. This has been implemented in impacket and we can see this behaviour clearly in `wmiexec.py`.
+Hold on a sec! The `cifs` SPN is only valid for access to file shares isn't it? So how come we can execute WMI queries all of a sudden? Apparently, the `sname` field is not signed or protected by any means, so we can basically change it to the SPN we want. You could look at this as a feature or a bug. Either way, this automatic switch has been implemented in impacket and we can see this behaviour clearly in `wmiexec.py`.
 
-Notice how it changes the SPN from CIFs to HOST in an attempt to get a valid SPN for WMI. It doesn't even have to request a new ticket, it just changes the name.
+Notice how it changes the SPN from CIFs to HOST in an attempt to get a valid SPN for WMI. It doesn't even have to request a new ticket, it just changes the name and gets a valid ticket.
 
-Check Secureauth's article [Kerberos Delegation, SPNs and More... | SecureAuth](https://www.secureauth.com/blog/kerberos-delegation-spns-and-more) for more information about this.
+Check Secureauth's article [Kerberos Delegation, SPNs and More](https://www.secureauth.com/blog/kerberos-delegation-spns-and-more) for more information about this.
 
 ## Executing the attack from Windows
 
@@ -183,13 +192,13 @@ Now, so far we've only used Linux to perform the post attack operations, but the
 
 ### Requesting ticket
 
-You can request the service ticket from Windows with [Rubeus](https://github.com/GhostPack/Rubeus). We have to hash the machine account password to RC4 first. Note that we have to escape the `'` characters as well.
+You can request the service ticket from Windows with [Rubeus](https://github.com/GhostPack/Rubeus). Now earlier when we executed the attack we got a username and a password for a new machine account in the domain. We have to hash the machine account password to RC4 first. Note that we have to escape the `'` characters from the password as well.
 
     .\Rubeus.exe hash /password:ol@19`7+jq''''5)&
 
 ![](../assets/img/relaydelegation/2019-04-14-16-05-19.png)
 
-We then execute the two Kerberos concepts `S4U2SELF` + `S4U2Proxy` in addition to injecting the ticket into the cache. It is all done in one operation using the `/ptt` parameter. Thanks [harmj0y](https://blog.harmj0y.net/)! We specify `s4u`, as the operations we want to performs, with the impersonating user `lkys` and the `cifs` ticket we want for `ws02.lab.local`
+We then use the machine account to execute the two Kerberos concepts `S4U2SELF` + `S4U2Proxy` in addition to injecting the ticket into the cache on our attacker Windows box. It is all done in one operation using the `/ptt` parameter. Thanks [harmj0y](https://blog.harmj0y.net/)! We specify `s4u`, as the operations we want to perform, with the impersonating user `lkys` and the `cifs` ticket we want for `ws02.lab.local`
 
     .\Rubeus.exe s4u /user:LUJCDPUQ$ /impersonateuser:lkys /msdsspn:"cifs/ws02.lab.local" /ptt /rc4:3116C16787230147050F6835AFBF5EDF
 
@@ -202,32 +211,32 @@ We then execute the two Kerberos concepts `S4U2SELF` + `S4U2Proxy` in addition t
 
 ### Explanation of the above
 
-What we are really doing here is abusing resource-based constrained delegation. You can read extensively about this in the article [Wagging the Dog: Abusing Resource-Based Constrained Delegation to Attack Active Directory](https://shenaniganslabs.io/2019/01/28/Wagging-the-Dog.html).
+What we are really doing here is abusing resource-based constrained delegation. You can read about this concept in the extensive article [Wagging the Dog: Abusing Resource-Based Constrained Delegation to Attack Active Directory](https://shenaniganslabs.io/2019/01/28/Wagging-the-Dog.html).
 
 Quickly explained though with the figure below as reference. In our example:
 - `Service A` = the machine account `LUJCDPUQ$` which we created
 - Service B = the computer object `WS02` 
 
-We are enabling resource based constrained delegation on that computer object using the credentials of the machine accounts `WS02$`. Essentially we are giving the the privilege to impersonate the user `lkys` on a computer.
+We are enabling resource based constrained delegation on that computer object using the credentials of the machine accounts `WS02$`. Essentially we are giving the the privilege to impersonate the user `lkys` on the `WS02` computer object.
 
 ![](https://shenaniganslabs.io/images/TrustedToAuthForDelegationWho/Diagrams/DelegationTypes.png)
 
-Then we have the S4u2Proxy request, as explained in step 4 above.
+Then we have the `S4u2Proxy` request, as explained in step 4 above.
 
 ![](https://shenaniganslabs.io/images/TrustedToAuthForDelegationWho/Diagrams/S4U2Proxy.png)
 
 
 ### Verifying access
 
-The service ticket for cifs on the target as the domain admin has been imported as can be displayed with `klist`.
+The service ticket for cifs on the target as the domain admin has been imported into the cache on our box, and can be displayed with `klist`. We see taht the ticket is valid for the client `lkys@lab.local` on the `cifs` sname on the computer `ws02.lab.local`.
 
 ![](../assets/img/relaydelegation/2019-04-14-16-18-29.png)
 
-We now have read access on the target host.
+We now have read access on the target host, as this ticket is used for authentication.
 
 ![](../assets/img/relaydelegation/2019-04-14-16-25-22.png)
 
-*Note that for getting command execution on the target through psexec or wmi, we need local admin on the host we are on. Without local admin we will not be able to perform psexec, wmiexec, etc.*
+*Note that for getting command execution on the target through psexec or wmi, we need local admin on the host we are on. Without local admin we will not be able to perform psexec, wmiexec, etc. That's why it's a good idea to do this from your attacking host.*
 
 ### Command execution
 
@@ -259,7 +268,7 @@ Inside the session we can see the TGS we used to authenticate with.
 
 ### RDP
 
-So, what if we are somehow blocked from getting command execution using PsExec, WinRM and similar? Maybe RDP is the only way we can get remote access, so we might need to get creative. I started looking into whether it was possible to pass a service ticket to RDP. If this is possible, it could mean there are ways of getting command execution on hosts through a Kerberos ticket without the requirement of being local administrator.
+So, what if we are somehow blocked from getting command execution using PsExec, WinRM and similar? If we imagine that RDP is the only way we can get remote access it's worth looking into whether it is possible to pass a service ticket to RDP. If this is the case, it could mean there are ways of getting command execution on hosts through a service ticket without the requirement of being local administrator on the target host.
 
 However, we can't see any specific parameter in RDP for passing a ticket, so this might get tricky. The `restrictedadmin` feature is of interest though.
 
@@ -282,9 +291,9 @@ Now start an RDP session with `restrictedadmin` which should in theory use the `
 
 ![](../assets/img/relaydelegation/2019-04-14-17-16-42.png)
 
-But it does not appear to work. I have to admit I spent quite a lot of time researching this without getting to the bottom of it. It appears that RDP requires a TGT, which we don't have to request a `termsrv` ticket of its own, and since we simply don't have that it fails to authenticate. I even initiated some dialoge with Benjamin Delpy about this on [Twitter](https://twitter.com/chryzsh/status/1107751511583543296).
+But it does not appear to work, and I spent quite a lot of time researching this without getting to the bottom of it. It appears that RDP requires a TGT, which we don't have to request a `termsrv` ticket of its own, and since we simply don't have that it fails to authenticate. I even initiated some dialoge with Benjamin Delpy about this on [Twitter](https://twitter.com/chryzsh/status/1107751511583543296).
 
-I did also try to find a way to do WMI remote code execution using a service ticket, but could not figure out any working method. **Ideas on any of the two? Please message me on Twitter.**
+I did also try to find a way to do WMI remote code execution from Windows using a service ticket, but could not figure out any working method. **Ideas on any of the two? Please message me on Twitter.**
 
 ## Further research
 
@@ -297,7 +306,7 @@ For the record, here is a reference for tickets necessary for different types of
 
 If the attack is spending a lot of time enumerating privileges and such, we can speed it up by disabling a few features in `ntlmrelayx`. This also ensures we are not executing other attacks like trying to add domain admins or perform ACL modifications.
 
-    ntlmrelayx.py -t ldaps://dc01.lab.local --delegate-access --no-smb-server -wh attacker-wpad-no-dump --no-da --no-acl --no-validate-privs 
+    ntlmrelayx.py -t ldaps://dc01.lab.local --delegate-access --no-smb-server -wh attacker-wpad-no-dump --no-da --no-acl --no-validate-privs
 
 ### Exporting the ticket from Linux to Windows
 
@@ -308,6 +317,7 @@ First, export the ticket to a kirbi file that can be used with Mimikatz using [K
     python KrbCredExport/KrbCredExport.py lkys.ccache lkys.kirbi
 
 ![](../assets/img/relaydelegation/2019-04-14-17-20-37.png)
+
 Transfer the ticket over to the Windows host, and import the ticket into the session with mimikatz
 
 ![](../assets/img/relaydelegation/2019-04-14-17-22-08.png)
@@ -346,11 +356,9 @@ Once the attack has been performed, the computer we targeted should have the acc
 
 ![](../assets/img/relaydelegation/2019-04-14-17-46-31.png)
 
-Note that we can't simply tell the DC to set the delegation privileges on the computer object to our domain user, because that user has no SPN, so `s4u` would not work. The domain user does not have the necessary privileges to configure an SPN on itself either, as this would allow any user to turn itself into a service account.
+And from here we can request a ticket like before and execute the rest of the attack.
 
-I did some experiments with this with another user I created, and while you can configure delegation privileges on the computer object, the user account doesn't have an SPN so Kerberos will simply say it can't find the SPN during the `s4u2self` process.
 
-![](../assets/img/relaydelegation/2019-04-14-17-48-23.png)
 
 ## Questions
 
@@ -358,19 +366,26 @@ I did some experiments with this with another user I created, and while you can 
 
 What we relay here is the machine account credentials, **not** the user credentials like with WPAD relaying attacks on IPv4. This confused me in the beginning.
 
-### 2 - Can't we capture and relay SMB?
+### 2- Can we configure delegation for a domain user in our control?
+No, we can't simply tell the DC to set the delegation privileges on the computer object to our domain user, because that user has no SPN, so `s4u` would not work. The domain user does not have the necessary privileges to configure an SPN on itself either, as this would allow any user to turn itself into a service account*
+
+I did some experiments with this with another user I created, and while you can configure delegation privileges on the computer object, the user account doesn't have an SPN so Kerberos will simply say it can't find the SPN during the `s4u2self` process.
+
+![](../assets/img/relaydelegation/2019-04-14-17-48-23.png)
+
+### 3 - Can't we capture and relay SMB?
 
 It is not possible to relay credentials from SMB to other protocols. That's simply a protection integrated in Microsoft's implemenation of SMB authentication. dirkan wrote about this in the bottom half of his [PrivExchange article](https://dirkjanm.io/abusing-exchange-one-api-call-away-from-domain-admin/).
 
-### 3 - Can't we capture and relay HTTP/Webdav?
+### 4 - Can't we capture and relay HTTP/Webdav?
 
 While you can relay credentials from HTTP/Webdav to LDAP through tricks like dropping lnk files, those won't relay the machine account credentials, only user account that accesses them. If you can find another way to get a machine account to contact you, that would work. That is basically what [PrivExchange](https://chryzsh.github.io/exploiting-privexchange/) does. 
 
-### 4 - Can we do it over IPv4?
+### 5 - Can we do it over IPv4?
 
 Microsoft has [patched](https://docs.microsoft.com/en-us/security-updates/securitybulletins/2016/ms16-077) the protocol fallback from DNS with MS16-077 where they removed both WPAD config broadcasts and automatic authentication to proxies. The patch does not apply to IPv6, apparently.
 
-### 5 - Can we do it without relaying?
+### 6 - Can we do it without relaying?
 
 Yes, if we already have access to a user account and foothold on a domain joined machine. We can then manually create a machine account, pop a shell with it's context and set the privileges manually. There is a section further up in the article called "Performing the attack manually".
 
@@ -379,4 +394,4 @@ Yes, if we already have access to a user account and foothold on a domain joined
 - [The worst of both worlds: Combining NTLM Relaying and Kerberos delegation](https://dirkjanm.io/worst-of-both-worlds-ntlm-relaying-and-kerberos-delegation/)
 - [mitm6 – compromising IPv4 networks via IPv6](https://blog.fox-it.com/2018/01/11/mitm6-compromising-ipv4-networks-via-ipv6/)
 - [List of SPNs at adsecurity.org](https://adsecurity.org/?page_id=183)
-- [Kerberos Delegation, SPNs and More... | SecureAuth](https://www.secureauth.com/blog/kerberos-delegation-spns-and-more)
+- [Kerberos Delegation, SPNs and More](https://www.secureauth.com/blog/kerberos-delegation-spns-and-more)
