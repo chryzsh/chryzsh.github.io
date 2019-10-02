@@ -392,6 +392,6 @@ Yes, if we already have access to a user account and foothold on a domain joined
 ## Links
 
 - [The worst of both worlds: Combining NTLM Relaying and Kerberos delegation](https://dirkjanm.io/worst-of-both-worlds-ntlm-relaying-and-kerberos-delegation/)
-- [mitm6 – compromising IPv4 networks via IPv6](https://blog.fox-it.com/2018/01/11/mitm6-compromising-ipv4-networks-via-ipv6/)
+- [mitm6 - compromising IPv4 networks via IPv6](https://blog.fox-it.com/2018/01/11/mitm6-compromising-ipv4-networks-via-ipv6/)
 - [List of SPNs at adsecurity.org](https://adsecurity.org/?page_id=183)
 - [Kerberos Delegation, SPNs and More](https://www.secureauth.com/blog/kerberos-delegation-spns-and-more)
