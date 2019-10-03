@@ -111,22 +111,23 @@ Note: when I did this I had both SSH and RDP going on to the boxes, so I filtere
 
 We see that it's trying to reach out to a host on a different network on port `8089`. This is most likely the deployment server it has been configured for.
 
+## Prepering the interface
 
-## Prepering the alias interface
+We know from tcpdump that the real DS is at `172.16.0.2`. This is a property configured on the forwarder, so there is little we can do about that. We need to trick traffic to that IP to go to our deployment server. My solution to this was configuring another IP address on the eth0 interface, which will then always have a shorter route to that IP than to the real DS. For this, we configure an IP address on `eth0` with the IP address of the real DS.
 
-We know from tcpdump that the real DS is at `172.16.0.2`. This is a property configured on the forwarder, so there is little we can do about that. We need to trick traffic to that IP to go to our deployment server. My solution to this was configuring an alias interface that will always be a shorter route than to the real DS. For this, we configure an alias interface on `eth0` with that IP. 
+   ip addr add 172.16.0.2 dev eth0
 
-    ifconfig eth0:0 172.16.0.2 up
+![](../assets/img/splunk-rce/2019-10-03-22-31-37.png)
 
-![](../assets/img/splunk-rce/2019-10-03-01-03-19.png)
-
-Verify that we have a route, but this should be obvious really.
+We verify that we have a route, but this should be obvious really.
 
     ip route get 172.16.0.2
 
 ![](../assets/img/splunk-rce/2019-10-02-23-59-17.png)
 
-Note that Splunk exposes itself on `0.0.0.0` so `8089` is not bound to any specific interface on the attacking host, hence this works and Splunk will be accessible on the alias interface.
+Note that Splunk exposes itself on `0.0.0.0` so `8089` is not bound to any specific interface on the attacking host. This means Splunk will be accessible on all interfaces and IPs you configure.
+
+Note: in an earlier version of the article I used an alias interface for this, which was completely unnecessary because the `ip` command natively support multiple IP addresses on an interface.
 
 ## Preparing the deployment package
 
@@ -194,6 +195,10 @@ Click the app in `Unselected App` and it will automagically move over to `Select
 Click `Save`
 
 ![](../assets/img/splunk-rce/2019-10-03-00-30-42.png)
+
+Click `Edit` on the App and in that new view, ensure `Restart Splunkd` is checked. If not, the splunk deamon on the victim won't restart and execute it's new app. Once done, click `Save`.
+
+![](../assets/img/splunk-rce/2019-10-03-22-37-16.png)
 
 Now click `Add Clients`
 
