@@ -5,6 +5,8 @@ title:  "RCE on any client - Splunk Magic!"
 date:   2019-10-02 23:18:00 +0200
 ---
 
+Attacking Splunk Universal Forwarders to achieve RCE.
+
 ![](../assets/img/splunk-rce/2019-10-03-00-38-52.png)
 ![](../assets/img/splunk-rce/emoji.png)
 
@@ -14,19 +16,25 @@ I sometimes find myself on engagements in a network with no credentials and not 
 
 ## What do we achieve from this attack?
 
-- Remote Code Execution as `SYSTEM` on any endpoint with Splunk installed.
+- Remote Code Execution as `SYSTEM` on any endpoint with Splunk Univeral
+  Forwarder installed.
 
 # Attack steps
 
-1. We configure a Splunk Deployment Server (DS) on our attacking host
+1. We configure a Splunk Deployment Server (DS) on our attacker host
 2. We ARP spoof the target and pretend we are the DS
 3. We deploy a malicious Splunk app to the target, that executes a payload
 
 # Prerequisites
 
-- A Linux machine on the same network as the target host(s)
+- A Linux machine on the same network as the victim host(s)
 - The ability to install and configure a Splunk deployment server on said machine
 - A scope that allows ARP spoofing and redirection of Splunk traffic, which can be potentially disruptive
+- Splunk Universal Forwarder running on the victim
+
+Note that Splunk has no authentication between the Universal Forwarder and
+Deployment Server. Thus, all we need to do is tell clients you are the
+forwarder, which is exactly what we do in this attack.
 
 # Setup
 
@@ -36,7 +44,7 @@ I sometimes find myself on engagements in a network with no credentials and not 
 - `192.168.0.20` - `kali01` - Attacker host
 - `192.168.0.1` - The default gateway
 
-I found a [useful diagram](http://downloads.jordan2000.com/splunk/Splunk-Common-Network-Ports-ver1.6.png) to show some of the Splunk components and what ports they communicate on. Most of it is beyond the scope of this simple demo, but it's worth taking a look at it to get familiar with Splunk infrastructure.
+I found a [useful diagram](http://downloads.jordan2000.com/splunk/Splunk-Common-Network-Ports-ver1.6.png) that displays some of the Splunk components and what ports they use for communication. Most of it is beyond the scope of this simple demo, but it's worth taking a look at it to get familiar with Splunk infrastructure.
 
 ## Preparing the victim
 
@@ -88,12 +96,12 @@ First enable port forwarding on the attacking host
 ![](../assets/img/splunk-rce/2019-10-03-01-01-39.png)
 
 
-Open two terminals and execute `arpspoof` to tell the target that we are the default gateway and the gateway that we are the target. This way, all traffic will be forwarded.
-    
+Open two terminals and execute `arpspoof` to tell the victim that we are the default gateway and the gateway that we are the victim. This way, all traffic to and from the victim will be forwarded through our attacker host.
+
     arpspoof -i eth0 -t 192.168.0.134 192.168.0.1
     arpspoof -i eth0 -t 192.168.0.1 192.168.0.134
 
-Instantly, you should see ARP replies coming in.
+Instantly upon execution, ARP replies are coming in.
 
 ![](../assets/img/splunk-rce/2019-10-03-00-46-11.png)
 
@@ -114,7 +122,7 @@ We see that it's trying to reach out to a host on a different network on port `8
 
 ## Prepering the alias interface
 
-We know from tcpdump that the real DS is at `172.16.0.2`. This is a property configured on the forwarder, so there is little we can do about that. We need to trick traffic to that IP to go to our deployment server. My solution to this was configuring an alias interface that will always be a shorter route than to the real DS. For this, we configure an alias interface on `eth0` with that IP. 
+We know from tcpdump that the real DS is at `172.16.0.2`. This is a property configured on the forwarder, so there is little we can do about that. We need to trick traffic to that IP to go to our deployment server. My solution to this was configuring an alias interface that will always be a shorter route than to the real DS. For this, we configure an alias interface on `eth0` with that IP.
 
     ifconfig eth0:0 172.16.0.2 up
 
@@ -130,12 +138,12 @@ Note that Splunk exposes itself on `0.0.0.0` so `8089` is not bound to any speci
 
 ## Preparing the deployment package
 
-We are going to prepare a Splunk app that will be deployed to the workstation. This app will simply run a bat file that runs a powershell-script, which executes a reverse shell. We don't care for implementing this ourselves when numerous proejcts are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job.
+We are going to prepare a Splunk app that will be deployed to the victim. We don't care for implementing this ourselves when numerous proejcts are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a powershell-script, which executes a reverse shell.
 
 We clone the repo and edit the `run.ps1` file to our attacker IP and port where we will be listening.
 
     git clone https://github.com/vartai-security/reverse_shell_splunk
-      
+
 ![](../assets/img/splunk-rce/2019-10-03-00-21-49.png)
 
     vim reverse_shell_splunk/reverse_shell_splunk/bin/run.ps1
@@ -201,11 +209,11 @@ Now click `Add Clients`
 
 ## Attack
 
-Now, everything is ready and prepared, all we need to do is execute the actual attack. This will happen quickly once we click Save, so we make sure everything is right before we click.
+Now, everything is ready and all we need to do is execute the actual attack. This will happen quickly once we click Save, so we make sure everything is all set up before we click.
 
 Specify the client in the whitelisting , which is our target and click Save.
 
-![](../assets/img/splunk-rce/2019-10-03-00-31-43.png) 
+![](../assets/img/splunk-rce/2019-10-03-00-31-43.png)
 
 It should deploy the App fairly quickly and give us some feedback when it has.
 
@@ -221,13 +229,13 @@ And there it is! Our beloved SYSTEM shell which we obtained from nothing but net
 
 ### Client polling
 
-Polling for new apps will always be initiated by the client, so we simply have to wait. If we are impatient and jsut want to simulate the attack, we can log on to the victim host and force a restart of the UF.
+Polling for new apps will always be initiated by the client, so we simply have to wait. If we are impatient and just want to simulate the attack, we can log on to the victim host and force a restart of the UF.
 
     C:\Program Files\SplunkUniversalForwarder\bin> .\splunk.exe restart
 
 ![](../assets/img/splunk-rce/2019-10-03-00-13-13.png)
 
-After the restart we should see in tpcdump the victim start connecting to your fake DS, thus installing the deployed app and execute the payload.
+After the restart we monitor using tcpdump, where we should see the victim start connecting to our fake DS, thus installing the deployed app and execute the payload.
 
 Note that the location of the deployed apps on the Windows endpoint is `C:\Program Files\SplunkUniversalForwarder\etc\apps`
 
