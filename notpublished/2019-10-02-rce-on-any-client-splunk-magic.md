@@ -23,6 +23,10 @@ I decided to configure Splunk in my lab to find out if it is possible to achieve
 - Remote Code Execution as `SYSTEM` on any endpoint with Splunk Univeral
   Forwarder running.
 
+### Consequences
+
+Note that there is a temporary consequence of this attack. When you hijack all Splunk management traffic from an endpoint, the endpoint will temporarily lose all its deployed Apps and be replaced by yours. Once the attack is stopped it should automatically connect back to the real deployment server and redownload it's apps. I have verified in a real production environment that this works realiably. However, all logs captured while the attack is ongoing is not sent to the real Deployment Server and is lost. You should inform the party that gave you consent to this attack of this consequence and ensure they agree to it.
+
 # Attack steps
 
 1. We configure a Splunk Deployment Server (DS) on our attacker host
@@ -232,7 +236,7 @@ It should deploy the App fairly quickly and give us some feedback when it has.
 
 ## Profit
 
-And there it is! Our beloved SYSTEM shell which we obtained from nothing but network access and some clever Splunk Magic. Highly rewarding as usual. Do a root dance if you ever get here!
+And there it is! Our beloved SYSTEM shell which we obtained from nothing but network access and some clever Splunk magic. Do a root dance if you ever get here!
 
 ![](../assets/img/splunk-rce/2019-10-03-00-01-13.png)
 
@@ -248,7 +252,7 @@ Polling for new apps will always be initiated by the client, so we simply have t
 
 After the restart we monitor using `tcpdump`, where we should see the victim start connecting to our fake DS, thus installing the deployed app and execute the payload.
 
-Note that the location of the deployed apps on the Windows endpoint is `C:\Program Files\SplunkUniversalForwarder\etc\apps`
+Note that the location of the deployed apps on the Windows endpoint is `C:\Program Files\SplunkUniversalForwarder\etc\apps`. You should see your malicious app here.
 
 ![](../assets/img/splunk-rce/2019-10-03-01-16-26.png)
 
@@ -262,7 +266,7 @@ ARP spoofing has been and still is possible to do in most broadcast domains. Dyn
 
 ## Splunk certificate authentication
 
-The environments I have seen do not enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated here works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`. 
+In the environments I have tested, the UF has not been configured to enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated in this post works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`. 
 
 ## Low privilege forwarder
 
