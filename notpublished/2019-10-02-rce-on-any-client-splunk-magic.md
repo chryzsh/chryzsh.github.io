@@ -1,23 +1,27 @@
 ---
 layout: single
 classes: wide
-title:  "RCE on any client - Splunk Magic!"
+title:  "RCE on endpoints - Splunk Magic!"
 date:   2019-10-02 23:18:00 +0200
 ---
 
-Attacking Splunk Universal Forwarders to achieve RCE.
+Attacking machichines running the Splunk Universal Forwarders to achieve RCE.
 
 ![](../assets/img/splunk-rce/2019-10-03-00-38-52.png)
 ![](../assets/img/splunk-rce/emoji.png)
 
 # Overview
 
-I sometimes find myself on engagements in a network with no credentials and not much going on for me. Responder doesn't always give me anything juicy and other more aggressive attack primitives are scoped out or impossible to execute. However, a quick portscan reveals port 8089 exposed on a couple of hosts. More often than not, this means a Splunk agent is installed. I've seen [research](https://threat.tevora.com/penetration-testing-with-splunk-leveraging-splunk-admin-credentials-to-own-the-enterprise/) on how to abuse Splunk for such purposes, but I had yet to try it myself. I decided to configure Splunk in my lab to find out if it is possible to achieve RCE on any host with Splunk installed, given access to the same network. Spoiler alert: the answer is yes.
+I sometimes find myself on engagements in a network with no credentials and not much going on for me. Responder doesn't always give me anything juicy and other more aggressive attack primitives are scoped out or impossible to execute.
+
+However, a quick portscan reveals port 8089 exposed on a couple of hosts. More often than not, this means a Splunk agent is installed. I've seen [research](https://threat.tevora.com/penetration-testing-with-splunk-leveraging-splunk-admin-credentials-to-own-the-enterprise/) on how to abuse Splunk for such purposes, but I had yet to try it myself.
+
+I decided to configure Splunk in my lab to find out if it is possible to achieve RCE on any host with the Splunk Universal Forwarder installed, given access to the same network. Spoiler alert: the answer is yes.
 
 ## What do we achieve from this attack?
 
 - Remote Code Execution as `SYSTEM` on any endpoint with Splunk Univeral
-  Forwarder installed.
+  Forwarder running.
 
 # Attack steps
 
@@ -141,6 +145,8 @@ Note: in an earlier version of the article I used an alias interface for this, w
 
 We are going to prepare a Splunk app that will be deployed to the victim. We don't care for implementing this ourselves when numerous proejcts are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a powershell-script, which executes a reverse shell.
 
+_Note that such a shell might trigger anti-malware alert and get blocked. I would suggest doing something that could be considered more opsec safe, like adding a local user and adding it to the local administrtors group._
+
 We clone the repo and edit the `run.ps1` file to our attacker IP and port where we will be listening.
 
     git clone https://github.com/vartai-security/reverse_shell_splunk
@@ -230,7 +236,7 @@ And there it is! Our beloved SYSTEM shell which we obtained from nothing but net
 
 ![](../assets/img/splunk-rce/2019-10-03-00-01-13.png)
 
-## Troubleshooting
+## Troubleshooting the attack
 
 ### Client polling
 
@@ -240,8 +246,57 @@ Polling for new apps will always be initiated by the client, so we simply have t
 
 ![](../assets/img/splunk-rce/2019-10-03-00-13-13.png)
 
-After the restart we monitor using tcpdump, where we should see the victim start connecting to our fake DS, thus installing the deployed app and execute the payload.
+After the restart we monitor using `tcpdump`, where we should see the victim start connecting to our fake DS, thus installing the deployed app and execute the payload.
 
 Note that the location of the deployed apps on the Windows endpoint is `C:\Program Files\SplunkUniversalForwarder\etc\apps`
 
 ![](../assets/img/splunk-rce/2019-10-03-01-16-26.png)
+
+# Mitigations
+
+As this attack consists of several components, there are several mitigations that apply to it.
+
+## Mitigating ARP spoofing
+
+ARP spoofing has been and still is possible to do in most broadcast domains. Dynamic ARP inspection (DAI) can prevent this by intercepting all ARP requests and responses. Each intercepted packet is verified for valid MAC address to IP bindings. The best information on this I could find was [some Cisco documentation](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst4500/12-2/25ew/configuration/guide/conf/dynarp.html).
+
+## Splunk certificate authentication
+
+The environments I have seen do not enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated here works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`. 
+
+## Low privilege forwarder
+
+Splunk support running the [UF in low-privilege mode](https://docs.splunk.com/Documentation/Forwarder/7.3.1/Forwarder/InstallaWindowsuniversalforwarderfromthecommandline#Install_the_universal_forwarder_in_low-privilege_mode). This will prevent the agent from running as SYSTEM and attacker getting access with those privileges. This is definitely not always desireable as you will not get complete logging from an endpoint without elevated privileges.
+
+## Securing Splunk Enterprise guides
+
+The following documentation shows how to secure and harden Splunk installations
+
+* [How to secure and harden your Splunk software installation](https://docs.splunk.com/Documentation/Splunk/latest/Security/Hardeningstandards)
+
+
+# Credits
+
+* [Ryan Hays](https://twitter.com/_ryanhays)
+  * [Penetration Testing with Splunk: Leveraging Splunk Admin Credentials to Own the Enterprise](https://threat.tevora.com/penetration-testing-with-splunk-leveraging-splunk-admin-credentials-to-own-the-enterprise/)
+  * [TBGSecurity/weaponize_splunk](https://github.com/TBGSecurity/weaponize_splunk)
+  * [TBGSecurity/splunk_shells](https://github.com/TBGSecurity/splunk_shells)
+* [El Nerdo](https://github.com/elnerd) -  for the idea of configuing an additional IP address.
+* Splunk guy at work, who put me onto this and helped me understand more about how Splunk works. _"It's one huge, dirty Python hack"_
+
+### Inspiring posts
+* https://www.n00py.io/2018/10/popping-shells-on-splunk/
+* https://averagesecurityguy.github.io/pentest/research/2012/04/12/pwning-a-splunk-server/
+* https://www.hackingarticles.in/penetration-testing-on-splunk/
+* https://clement.notin.org/blog/2019/02/25/Splunk-Universal-Forwarder-Hijacking-2-SplunkWhisperer2/
+* https://medium.com/@airman604/splunk-universal-forwarder-hijacking-5899c3e0e6b2
+* https://www.youtube.com/watch?v=EPehfD7r79s
+
+### Tools
+* https://github.com/cnotin/SplunkWhisperer2
+* https://github.com/tevora-threat/splunk_pentest_app
+* https://github.com/Dionach/Splunk-Web-Shell
+* https://github.com/0xjpuff/reverse_shell_splunk
+* https://github.com/FooBallZ/SplunkPWNScripts
+* https://github.com/airman604/splunk_whisperer
+* https://github.com/f8al/TA-Shell
