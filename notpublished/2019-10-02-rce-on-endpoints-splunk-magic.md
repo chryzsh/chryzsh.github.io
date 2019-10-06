@@ -295,6 +295,7 @@ The following documentation shows how to secure and harden Splunk installations
 * https://clement.notin.org/blog/2019/02/25/Splunk-Universal-Forwarder-Hijacking-2-SplunkWhisperer2/
 * https://medium.com/@airman604/splunk-universal-forwarder-hijacking-5899c3e0e6b2
 * https://www.youtube.com/watch?v=EPehfD7r79s
+* https://conf.splunk.com/session/2014/conf2014_DuaneWaddleGeorgeStarcher_Self_UsingTrack.pdf
 
 ### Tools
 * https://github.com/cnotin/SplunkWhisperer2
