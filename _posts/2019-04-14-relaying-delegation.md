@@ -22,19 +22,23 @@ I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerb
 
 # How does it work?
 
-1. We set up a man-in-the-middle DNS on IPv6 and serve a WPAD proxy configuration file that prompts the victim for authentication to our fake proxy server. That way, when the victim computer boots and starts looking for proxy config, the machine account tries to authenticate to us.
+When Windows configured for DHCP boots, it looks for DHCP configuration, and then proxy configuration using WPAD. That way, when the victim computer boots and starts looking for proxy config, the machine account tries to authenticate to us.
 
-2. We capture and relay the (encrypted) credentials of the machine account to LDAP on the domain controller (DC).
+0. We set up a man-in-the-middle DHCP server on IPv6 and serve a DNS IPv6 configuration that points to our rogue DNS IPv6 server.
 
-3. We send to the DC on LDAPS that we want to create a new mahine account. Active Directory allows any user account, including machine accounts to add 10 machine accounts by default.
+1. When victim uses WPAD to look for a proxy configuration file over DNS, we let it connect to our fake proxy server and then prompt for authentication using a `407 Authentication Required` request.
 
-4. ntlmrelayx prints that machine account name and password. The reason we create an account, is because we need access to a user account later.
+2. We capture and relay the (encrypted) credentials of the machine account to LDAPS on the domain controller (DC).
 
-5. ntlmrelayx uses this new machine account to set the delegation privilege on its corresponding computer. So in our example below, the machine account `WS02$` sets the `msDS-AllowedToActOnBehalfOfOtherIdentity` attribute on the computer object `WS02` to allow the newly created machine account to impersonate users on it.
+3. We ask the DC over LDAPS to create a new mahine account. Active Directory allows any user account, including machine accounts to add 10 machine accounts by default.
 
-6. We request a ticket using the machine account that was created where we impersonate a user that has local admin access to  our target computer.
+4. We now have a machine account username and password. The reason we create a machine account is because we need access to a user account with a Service Principal Name (SPN) later.
 
-7. We use the ticket to access the computer with local admin privileges. The ticket with these privs is only valid on the target box.
+5. We again ask the DC to configure resource based constrained delegation for this new machine account on the vicim computer object. Examplewise: the machine account `WS02$` sets the `msDS-AllowedToActOnBehalfOfOtherIdentity` attribute on the computer object `WS02` to allow the newly created machine account to impersonate users on it.
+
+6. We request a ticket using the machine account that was created, where we impersonate a user that has local admin access to our target computer.
+
+7. We use the ticket to access the computer with local admin privileges. The ticket with these privileges is only valid on the target box.
 
 # Prerequisites
 
@@ -53,7 +57,7 @@ I'm a huge fan of [dirkjan](https://dirkjanm.io/)'s recent discoveries with Kerb
   - Active Directory Certificate Services (ADCS) must be running on the DC with a valid certificate installed. This enables LDAP over TLS.
 - IPv6 must be enabled in the network
 
-We can replicate the attack by signing in and out of Windows for every try, assuming a lab scenario where we control the target. In a real scenario we would have to force a reboot somehow, or show up early and wait for people to turn on their computers.
+We can replicate the attack by rebooting Windows for every try, assuming a lab scenario where we control the target. In a real scenario we would have to force a reboot somehow, or show up early and wait for people to turn on their computers. A disconnect of the network card should supposedly work as well, but this is not entirely consistent in my experience.
 
 # Setup
 
@@ -266,6 +270,8 @@ Inside the session we can see the TGS we used to authenticate with.
 
 ![](../assets/img/relaydelegation/2019-04-14-16-47-15.png)
 
+## Further research
+
 ### RDP
 
 So, what if we are somehow blocked from getting command execution using PsExec, WinRM and similar? If we imagine that RDP is the only way we can get remote access it's worth looking into whether it is possible to pass a service ticket to RDP. If this is the case, it could mean there are ways of getting command execution on hosts through a service ticket without the requirement of being local administrator on the target host.
@@ -294,8 +300,6 @@ Now start an RDP session with `restrictedadmin` which should in theory use the `
 But it does not appear to work, and I spent quite a lot of time researching this without getting to the bottom of it. It appears that RDP requires a TGT, which we don't have to request a `termsrv` ticket of its own, and since we simply don't have that it fails to authenticate. I even initiated some dialoge with Benjamin Delpy about this on [Twitter](https://twitter.com/chryzsh/status/1107751511583543296).
 
 I did also try to find a way to do WMI remote code execution from Windows using a service ticket, but could not figure out any working method. **Ideas on any of the two? Please message me on Twitter.**
-
-## Further research
 
 ### SPN to service mappings
 
@@ -336,13 +340,13 @@ It could be LDAPS is simply not configured, which means there is no certificate 
 
 ![](../assets/img/relaydelegation/2019-04-14-13-49-28.png)
 
-If we somehow already have access to a domain user, we can get around this by adding a machine account manually with [Powermad](https://github.com/Kevin-Robertson/Powermad). For some reason, this works over LDAP, without TLS. Could it be a question of relayed vs stored credentials? **If someone knows why this works, please message me on Twitter.**
+If we somehow already have access to a domain user, we can get around this by adding a machine account manually with [Powermad](https://github.com/Kevin-Robertson/Powermad). This works over LDAP without TLS because Windows will use GSSAPI signing and sealing if required, which also encrypts the packets. This is different than LDAPS, because signning and/or sealing is not performed when relaying because the negotiated session key can't be otained. Thanks for this clarification, @elad_shamir and @dirkjanm!
 
     New-MachineAccount -MachineAccount test -Domain lab.local -DomainController dc01.lab.local -Credential chry
 
 ![](../assets/img/relaydelegation/2019-04-14-17-27-54.png)
 
-Note that above I need to specify a domain context using an existing user because I was doing it from a non-domain joined machine.
+Note that above I need to specify a domain context using a domain user, because I was executing the script from a non-domain joined machine.
 
 Now when doing the relaying, specify to use the newly created machine account with the `—escalate-user` parameter followed by the machine account we added. Note here that we specify `ldap` and not `ldaps`.
 
@@ -350,7 +354,7 @@ Now when doing the relaying, specify to use the newly created machine account wi
 
 ![](../assets/img/relaydelegation/2019-04-14-17-45-34.png)
 
-Once the attack has been performed, the computer we targeted should have the account we added in the `PrincipalsAllowedToDelegateToAccount` attribute, in addition to the account which was created earlier.
+Once the attack has been performed, the computer we targeted should have the account we added in the `PrincipalsAllowedToDelegateToAccount` attribute, in addition to the machine account which was created when I executed the attack earlier.
 
 `Get-ADComputer WS02 -Properties PrincipalsAllowedToDelegateToAccount`
 
@@ -358,16 +362,15 @@ Once the attack has been performed, the computer we targeted should have the acc
 
 And from here we can request a ticket like before and execute the rest of the attack.
 
-
-
 ## Questions
 
 ### 1 - Are we relaying the domain user or machine account?
 
-What we relay here is the machine account credentials, **not** the user credentials like with WPAD relaying attacks on IPv4. This confused me in the beginning.
+What we relay here is the machine account credentials, **not** the user credentials like with WPAD relaying attacks on IPv4. This confused me in the beginning, so I just wanted to make that abundantly clear.
 
 ### 2- Can we configure delegation for a domain user in our control?
-No, we can't simply tell the DC to set the delegation privileges on the computer object to our domain user, because that user has no SPN, so `s4u` would not work. The domain user does not have the necessary privileges to configure an SPN on itself either, as this would allow any user to turn itself into a service account*
+
+No, we can't simply tell the DC to set the delegation privileges on the computer object to our domain user, because that user has no SPN, so `s4u` would not work. The domain user does not have the necessary privileges to configure an SPN on itself either, as this would allow any user to turn itself into a service account.
 
 I did some experiments with this with another user I created, and while you can configure delegation privileges on the computer object, the user account doesn't have an SPN so Kerberos will simply say it can't find the SPN during the `s4u2self` process.
 
@@ -377,21 +380,50 @@ I did some experiments with this with another user I created, and while you can 
 
 It is not possible to relay credentials from SMB to other protocols. That's simply a protection integrated in Microsoft's implemenation of SMB authentication. dirkan wrote about this in the bottom half of his [PrivExchange article](https://dirkjanm.io/abusing-exchange-one-api-call-away-from-domain-admin/).
 
-### 4 - Can't we capture and relay HTTP/Webdav?
+Update: vulnerabilties were published in 2019 that shows the bypass of NTLM relaying mitigations like SMB signing. Using a combination of these vulnerabilities, it is possible to relay SMB authentication to LDAP. See [@dirkjanm's article](https://dirkjanm.io/exploiting-CVE-2019-1040-relay-vulnerabilities-for-rce-and-domain-admin/) for more details
 
-While you can relay credentials from HTTP/Webdav to LDAP through tricks like dropping lnk files, those won't relay the machine account credentials, only user account that accesses them. If you can find another way to get a machine account to contact you, that would work. That is basically what [PrivExchange](https://chryzsh.github.io/exploiting-privexchange/) does. 
+### 4 - Can't we capture and relay HTTP/WebDAV?
+
+While you can relay credentials from HTTP/WebDAV to LDAP through tricks like dropping lnk files, those won't relay the machine account credentials, only user account that accesses them. If you can find another way to get a machine account to contact you, that would work. That is basically what [PrivExchange](https://chryzsh.github.io/exploiting-privexchange/) does. 
 
 ### 5 - Can we do it over IPv4?
 
-Microsoft has [patched](https://docs.microsoft.com/en-us/security-updates/securitybulletins/2016/ms16-077) the protocol fallback from DNS with MS16-077 where they removed both WPAD config broadcasts and automatic authentication to proxies. The patch does not apply to IPv6, apparently.
+Microsoft has patched the protocol fallback from DNS with [MS16-077](https://docs.microsoft.com/en-us/security-updates/securitybulletins/2016/ms16-077) where they removed both WPAD config broadcasts and automatic authentication to proxies. ~~The patch does not apply to IPv6, apparently.~~
 
-### 6 - Can we do it without relaying?
+Note: I misunderstood this earlier and had a big a-ha moment when i reread the [mitm6 blog](https://blog.fox-it.com/2018/01/11/mitm6-compromising-ipv4-networks-via-ipv6/). The patch indeed applies to IPv6, and the way mitm6 bypasses this patch is by letting the victim connect to the proxy, then prompt it for authentication by replying to it with `HTTP 407 Proxy Authentication` instead of the normal `HTTP 401` code.
 
-Yes, if we already have access to a user account and foothold on a domain joined machine. We can then manually create a machine account, pop a shell with it's context and set the privileges manually. There is a section further up in the article called "Performing the attack manually".
+### 6 - Can we execute it without relaying?
+
+Yes and no. There are a few possible scenarios here depending on your current level of access. The strict requirement for the attack access to an account with an SPN, and being able to configure resource based constrained delegation on a computer object. As demonstrated in this article, both can be achieved by relaying a machine account's credentials. Note that all attacks using these properties still require access to a Linux box on the network.
+
+#### Scenario 0 - Nothing new
+
+- Access to low privilege user
+- `Machineaccountquota` > 0
+
+If we already have access to a low privilege user account, we can manually create a machine account, pop a shell with it's context, but not configure delegation for the computer object of your victim. Consequently, this does not acquire you anything you can't get with network access only. The only exception being that you might have a way to remotely reboot your target machine, but this is not a common scenario.
+
+#### Scenario 1 - Local Privilege Escalation
+
+- Access to host as low privilege user
+- `Machineaccountquota` > 0
+
+This one is slightly more interesting as you can gain local privilege escalation by rebooting the target host. If you are a penetration tester and wish to demonstrate how your client is vulnerable, ask for a laptop, a low privilege user account and recreate this attack.
+
+### Further work
+
+#### Executing attacks from Windows hosts only
+
+[egre55](https://egre55.github.io) and I have been talking about the possibility of porting some of these tools to Windows binaries to possible execute the discussed attacks as a low or high privileged user in an AD domain. That would make these attack primitives even more dangerous from a defense perspective than the current scenario that requires root access to a Linux box on the same network.
+
+#### Executing similar attacks using IPv4
+
+There have been many PoCs for such attacks, but they often have more strict requirements to fully work. I might publish a blog post detailing such attacks.
 
 ## Links
 
 - [The worst of both worlds: Combining NTLM Relaying and Kerberos delegation](https://dirkjanm.io/worst-of-both-worlds-ntlm-relaying-and-kerberos-delegation/)
+- [Wagging the Dog: Abusing Resource-Based Constrained Delegation to Attack Active Directory](https://eladshamir.com/2019/01/28/Wagging-the-Dog.html)
 - [mitm6 - compromising IPv4 networks via IPv6](https://blog.fox-it.com/2018/01/11/mitm6-compromising-ipv4-networks-via-ipv6/)
 - [List of SPNs at adsecurity.org](https://adsecurity.org/?page_id=183)
 - [Kerberos Delegation, SPNs and More](https://www.secureauth.com/blog/kerberos-delegation-spns-and-more)
