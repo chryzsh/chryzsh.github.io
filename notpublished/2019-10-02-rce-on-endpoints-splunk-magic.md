@@ -5,7 +5,7 @@ title:  "RCE on endpoints - Splunk Magic!"
 date:   2019-10-02 23:18:00 +0200
 ---
 
-Attacking machichines running the Splunk Universal Forwarders to achieve RCE.
+Attacking machines running the Splunk Universal Forwarders to achieve RCE.
 
 ![](../assets/img/splunk-rce/2019-10-03-00-38-52.png)
 ![](../assets/img/splunk-rce/emoji.png)
@@ -14,18 +14,17 @@ Attacking machichines running the Splunk Universal Forwarders to achieve RCE.
 
 I sometimes find myself on engagements in a network with no credentials and not much going on for me. Responder doesn't always give me anything juicy and other more aggressive attack primitives are scoped out or impossible to execute.
 
-However, a quick portscan reveals port 8089 exposed on a couple of hosts. More often than not, this means a Splunk agent is installed. I've seen [research](https://threat.tevora.com/penetration-testing-with-splunk-leveraging-splunk-admin-credentials-to-own-the-enterprise/) on how to abuse Splunk for such purposes, but I had yet to try it myself.
+However, a quick port scan reveals port 8089 exposed on a couple of hosts. More often than not, this means a Splunk agent is installed. I've seen [research](https://threat.tevora.com/penetration-testing-with-splunk-leveraging-splunk-admin-credentials-to-own-the-enterprise/) on how to abuse Splunk for such purposes, but I had yet to try it myself.
 
 I decided to configure Splunk in my lab to find out if it is possible to achieve RCE on any host with the Splunk Universal Forwarder installed, given access to the same network. Spoiler alert: the answer is yes.
 
 ## What do we achieve from this attack?
 
-- Remote Code Execution as `SYSTEM` on any endpoint with Splunk Univeral
-  Forwarder running.
+- Remote Code Execution as `SYSTEM` on any endpoint with Splunk Universal Forwarder running.
 
 ### Consequences
 
-Note that there is a temporary consequence of this attack. When you hijack all Splunk management traffic from an endpoint, the endpoint will temporarily lose all its deployed Apps and be replaced by yours. Once the attack is stopped it should automatically connect back to the real deployment server and redownload it's apps. I have verified in a real production environment that this works realiably. However, all logs captured while the attack is ongoing is not sent to the real Deployment Server and is lost. You should inform the party that gave you consent to this attack of this consequence and ensure they agree to it.
+Note that there is a temporary consequence of this attack. When you hijack all Splunk management traffic from an endpoint, the endpoint will temporarily lose all its deployed Apps and be replaced by yours. Once the attack is stopped it should automatically connect back to the real deployment server and redownload it's apps. I have verified in a real production environment that this works reliably. However, all logs captured while the attack is ongoing is not sent to the real Deployment Server and is lost. You should inform the party that gave you consent to this attack of this consequence and ensure they agree to it.
 
 # Attack steps
 
@@ -56,7 +55,7 @@ I found a [useful diagram](http://downloads.jordan2000.com/splunk/Splunk-Common-
 
 ## Preparing the victim
 
-In a real scenario you will not have access to the victim (duh). I included this section so you can replicate the attack if you wish.
+In a real scenario you will not have access to the victim (duh). I included this section so you can replicate the attack in your lab.
 
 Install the Splunk Universal Forwarder (UF) with [Choco](https://chocolatey.org/)
 
@@ -89,8 +88,6 @@ Once the server is installed, start it
 
 ![](../assets/img/splunk-rce/2019-10-02-23-47-39.png)
 
-
-
 ## ARP spoofing
 
 We need to ARP spoof the victim to be able to say we are the deployment server. However, we are not always lucky enough to be in the same network as the real Deployment Server. Hence, we need to find out where it is, and spoof it. We do that by spoofing the default gateway for our victim, consequently routing everything through us.
@@ -102,7 +99,6 @@ First enable port forwarding on the attacking host
     sysctl -p
 
 ![](../assets/img/splunk-rce/2019-10-03-01-01-39.png)
-
 
 Open two terminals and execute `arpspoof` to tell the victim that we are the default gateway and the gateway that we are the victim. This way, all traffic to and from the victim will be forwarded through our attacker host.
 
@@ -127,9 +123,9 @@ Note: when I did this I had both SSH and RDP going on to the boxes, so I filtere
 
 We see that it's trying to reach out to a host on a different network on port `8089`. This is most likely the deployment server it has been configured for.
 
-## Prepering the interface
+## Preparing the interface
 
-We know from tcpdump that the real DS is at `172.16.0.2`. This is a property configured on the forwarder, so there is little we can do about that. We need to trick traffic to that IP to go to our deployment server. My solution to this was configuring another IP address on the eth0 interface, which will then always have a shorter route to that IP than to the real DS. For this, we configure an IP address on `eth0` with the IP address of the real DS.
+We know from `tcpdump` that the real DS is at `172.16.0.2`. This is a property configured on the forwarder, so there is little we can do about that. We need to trick traffic to that IP to go to our deployment server. My solution to this was configuring another IP address on the eth0 interface, which will then always have a shorter route to that IP than to the real DS. For this, we configure an IP address on `eth0` with the IP address of the real DS.
 
     ip addr add 172.16.0.2 dev eth0
 
@@ -145,11 +141,13 @@ Note that Splunk exposes itself on `0.0.0.0` so `8089` is not bound to any speci
 
 Note: in an earlier version of the article I used an alias interface for this, which was completely unnecessary because the `ip` command natively support multiple IP addresses on an interface.
 
+I also played with DNS spoofing to simply hijack the DNS query for the Deployment Server, but I had trouble getting it to succeed consistently.
+
 ## Preparing the deployment package
 
-We are going to prepare a Splunk app that will be deployed to the victim. We don't care for implementing this ourselves when numerous proejcts are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a powershell-script, which executes a reverse shell.
+We are going to prepare a Splunk app that will be deployed to the victim. We don't care for implementing this ourselves when numerous projects are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a Powershell-script, which executes a reverse shell.
 
-_Note that such a shell might trigger anti-malware alert and get blocked. I would suggest doing something that could be considered more opsec safe, like adding a local user and adding it to the local administrtors group._
+_Note that such a shell might trigger anti-malware alert and get blocked. I would suggest doing something that could be considered more opsec safe, like adding a local user and adding it to the local administrators group._
 
 We clone the repo and edit the `run.ps1` file to our attacker IP and port where we will be listening.
 
@@ -262,15 +260,17 @@ As this attack consists of several components, there are several mitigations tha
 
 ## Mitigating ARP spoofing
 
-ARP spoofing has been and still is possible to do in most broadcast domains. Dynamic ARP inspection (DAI) can prevent this by intercepting all ARP requests and responses. Each intercepted packet is verified for valid MAC address to IP bindings. The best information on this I could find was [some Cisco documentation](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst4500/12-2/25ew/configuration/guide/conf/dynarp.html).
+ARP spoofing has been and still is possible to do in most broadcast domains. Dynamic ARP inspection (DAI) can prevent this by intercepting all ARP requests and responses. Each intercepted packet is verified for valid MAC address to IP bindings. The best information on this I could find was [some Cisco documentation](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst4500/12-2/25ew/configuration/guide/conf/dynarp.html). There are also a vast range of [third party solutions](https://en.wikipedia.org/wiki/ARP_spoofing?oldformat=true#Defense) available.
+
+Note that the cost of implementing this in large enterprise networks may not benefit the risk.
 
 ## Splunk certificate authentication
 
-In the environments I have tested, the UF has not been configured to enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated in this post works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`. 
+In the environments I have tested, the UF has not been configured to enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated in this post works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`.
 
 ## Low privilege forwarder
 
-Splunk support running the [UF in low-privilege mode](https://docs.splunk.com/Documentation/Forwarder/7.3.1/Forwarder/InstallaWindowsuniversalforwarderfromthecommandline#Install_the_universal_forwarder_in_low-privilege_mode). This will prevent the agent from running as SYSTEM and attacker getting access with those privileges. This is definitely not always desireable as you will not get complete logging from an endpoint without elevated privileges.
+Splunk support running the [UF in low-privilege mode](https://docs.splunk.com/Documentation/Forwarder/7.3.1/Forwarder/InstallaWindowsuniversalforwarderfromthecommandline#Install_the_universal_forwarder_in_low-privilege_mode). This will prevent the agent from running as SYSTEM and attacker getting access with those privileges. This is definitely not always desirable as you will not get complete logging from an endpoint without elevated privileges.
 
 ## Securing Splunk Enterprise guides
 
@@ -278,17 +278,22 @@ The following documentation shows how to secure and harden Splunk installations
 
 * [How to secure and harden your Splunk software installation](https://docs.splunk.com/Documentation/Splunk/latest/Security/Hardeningstandards)
 
+## IPsec
+
+[@bravo2day](https://twitter.com/bravo2day) started looking into mitigating this vulnerability by tunneling the Deployment Server traffic through an IPsec tunnel. Using the Windows firewall it is apparently possible to make the UF connect to the same address, but using a connection security rule to establish an IPsec tunnel for traffic to destination port 8089. Note that since both Cluster Master and Deployment Server traffic is destination port 8089, this will make both services go through the tunnel. This solution might be more efficient than implementing PKI for an enterprise. I think it's a very creative solution to mitigate this vulnerability.
 
 # Credits
 
-* [Ryan Hays](https://twitter.com/_ryanhays)
+* [Ryan Hays](https://twitter.com/_ryanhays) - Lots of good research and toolkits for Splunk attacks!
   * [Penetration Testing with Splunk: Leveraging Splunk Admin Credentials to Own the Enterprise](https://threat.tevora.com/penetration-testing-with-splunk-leveraging-splunk-admin-credentials-to-own-the-enterprise/)
   * [TBGSecurity/weaponize_splunk](https://github.com/TBGSecurity/weaponize_splunk)
   * [TBGSecurity/splunk_shells](https://github.com/TBGSecurity/splunk_shells)
-* [El Nerdo](https://github.com/elnerd) -  for the idea of configuing an additional IP address.
+* [El Nerdo](https://github.com/elnerd) -  for the idea of configuring an additional IP address.
 * Splunk guy at work, who put me onto this and helped me understand more about how Splunk works. _"It's one huge, dirty Python hack"_
+* [@bravo2day](https://twitter.com/bravo2day) - for ideas around IPsec mitigation.
 
 ### Inspiring posts
+
 * https://www.n00py.io/2018/10/popping-shells-on-splunk/
 * https://averagesecurityguy.github.io/pentest/research/2012/04/12/pwning-a-splunk-server/
 * https://www.hackingarticles.in/penetration-testing-on-splunk/
@@ -298,6 +303,7 @@ The following documentation shows how to secure and harden Splunk installations
 * https://conf.splunk.com/session/2014/conf2014_DuaneWaddleGeorgeStarcher_Self_UsingTrack.pdf
 
 ### Tools
+
 * https://github.com/cnotin/SplunkWhisperer2
 * https://github.com/tevora-threat/splunk_pentest_app
 * https://github.com/Dionach/Splunk-Web-Shell
