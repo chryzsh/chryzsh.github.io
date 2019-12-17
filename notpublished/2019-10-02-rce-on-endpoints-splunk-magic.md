@@ -280,7 +280,7 @@ The following documentation shows how to secure and harden Splunk installations
 
 ## IPsec
 
-[@bravo2day](https://twitter.com/bravo2day) started looking into mitigating this vulnerability by tunneling the Deployment Server traffic through an IPsec tunnel. Using the Windows firewall it is apparently possible to make the UF connect to the same address, but using a connection security rule to establish an IPsec tunnel for traffic to destination port 8089. Note that since both Cluster Master and Deployment Server traffic is destination port 8089, this will make both services go through the tunnel. This solution might be more efficient than implementing PKI for an enterprise. I think it's a very creative solution to mitigate this vulnerability.
+[@bravo2day](https://twitter.com/bravo2day) and [@silkeslips](https://twitter.com/silkeslips) started looking into mitigating this vulnerability by tunneling the Deployment Server traffic through an IPsec tunnel. Using the Windows firewall it is apparently possible to make the UF connect to the same address, but using a connection security rule to establish an IPsec tunnel for traffic to destination port 8089. Note that since both Cluster Master and Deployment Server traffic is destination port 8089, this will make both services go through the tunnel. This solution might be more efficient than implementing PKI for an enterprise. I think it's a very creative solution to mitigate this vulnerability.
 
 # Credits
 
