@@ -26,19 +26,19 @@ When Windows configured for DHCP boots, it looks for DHCP configuration, and the
 
 0. We set up a man-in-the-middle DHCP server on IPv6 and serve a DNS IPv6 configuration that points to our rogue DNS IPv6 server.
 
-1. When victim uses WPAD to look for a proxy configuration file over DNS, we let it connect to our fake proxy server and then prompt for authentication using a `407 Authentication Required` request.
+1. When the victim uses WPAD to look for a proxy configuration file over DNS, we let it connect to our fake proxy server and then prompt for authentication using a `407 Authentication Required` request.
 
 2. We capture and relay the (encrypted) credentials of the machine account to LDAPS on the domain controller (DC).
 
-3. We ask the DC over LDAPS to create a new mahine account. Active Directory allows any user account, including machine accounts to add 10 machine accounts by default.
+3. We ask the DC over LDAPS to create a new machine account. Active Directory allows any user account, including machine accounts to add 10 machine accounts by default.
 
-4. We now have a machine account username and password. The reason we create a machine account is because we need access to a user account with a Service Principal Name (SPN) later.
+4. We now have credentials for a machine account. The reason we create a machine account is that we need access to an account with a Service Principal Name (SPN).
 
-5. We again ask the DC to configure resource based constrained delegation for this new machine account on the vicim computer object. Examplewise: the machine account `WS02$` sets the `msDS-AllowedToActOnBehalfOfOtherIdentity` attribute on the computer object `WS02` to allow the newly created machine account to impersonate users on it.
+5. We now ask the DC to configure resource-based constrained delegation for this new machine account on the victim computer object. For example: the machine account `WS02$` sets the `msDS-AllowedToActOnBehalfOfOtherIdentity` attribute on the computer object `WS02` to allow the newly created machine account to impersonate users on it.
 
-6. We request a ticket using the machine account that was created, where we impersonate a user that has local admin access to our target computer.
+6. We request a service ticket using the machine account that was created, where we impersonate a user that has local admin access to our target computer.
 
-7. We use the ticket to access the computer with local admin privileges. The ticket with these privileges is only valid on the target box.
+7. We use the service ticket to access the computer with local admin privileges. The ticket with these privileges is only valid on the target box.
 
 # Prerequisites
 
@@ -107,7 +107,7 @@ Once the attack has been performed, the machine account should show up as a comp
 
 ![](../assets/img/relaydelegation/2019-04-14-13-33-09.png)
 
-We can see with RSAT that the `LUJCDPUQ$` machine account is allowed to deleagate on the computer object `WS02`. This can be seen in the `PrincipalsAllowedToDelegateToAccount` attribute on the computer object. We can use RSAT to query this
+We can see with RSAT that the `LUJCDPUQ$` machine account is allowed to delegate on the computer object `WS02`. This can be seen in the `PrincipalsAllowedToDelegateToAccount` attribute on the computer object. We can use RSAT to query this
 
     Get-ADComputer WS02 -Properties PrincipalsAllowedToDelegateToAccount
 
@@ -121,7 +121,7 @@ We can check with [Powermad](https://github.com/Kevin-Robertson/Powermad) who ad
 
 ## Request Kerberos ticket
 
-We now request a Kerberos service ticket (TGS) for the `cifs` SPN  for the machine account we created, using impersonation as a user `lkys` that is member of the`Domain Admins` group. That user naturally has local administrator access to all computers in the domain. When prompted for password,we input the password thas was set for the machine account `LUJCDPUQ$` when we performed the relaying attack.
+We now request a Kerberos service ticket (TGS) for the `cifs` SPN  for the machine account we created, using impersonation as a user `lkys` that is member of the`Domain Admins` group. That user naturally has local administrator access to all computers in the domain. When prompted for password,we input the password that was set for the machine account `LUJCDPUQ$` when we performed the relaying attack.
 
 *Common Internet File System (CIFS) is a network filesystem protocol used for providing shared access to files and printers between machines on the network.*
 
@@ -141,7 +141,7 @@ We import the ticket from file into the Kerberos cache on our attacker box.
 
 Before we get into command execution, we verify that we have read access to the c$ share. This is a common way to check if we have administrator privileges on a remote host.
 
-We authenticate to SMB on `WS02` with the ticket using `smbclient` with the `-k` parameter that indicates we want to use a Kerberos ticket and **not** NTLM authentcation with username and password.
+We authenticate to SMB on `WS02` with the ticket using `smbclient` with the `-k` parameter that indicates we want to use a Kerberos ticket and **not** NTLM authentication with username and password.
 
     smbclient -k //ws02.lab.local/c$
 
@@ -155,7 +155,7 @@ Or with `smbclient.py` We don't need to specify the full SPN, but I do it here t
 
 ## Command execution
 
-We can get interactive remote command execution using `psexec.py`. Note that we can only get command execution as the SYSTEM user with psexec and is it starts a service remotely as that user. 
+We can get interactive remote command execution using `psexec.py`. Note that we can only get command execution as the SYSTEM user with PSexec and is it starts a service remotely as that user. 
 
     psexec.py -k ws02.lab.local -debug -no-pass
 
@@ -165,7 +165,6 @@ We can also get it with `wmiexec.py`. With this, we actually get command executi
 
 ![](../assets/img/relaydelegation/2019-04-14-15-45-33.png)
 
-
 If we want to dump the hashes of the target, we can use `secretsdump.py`
 
     secretsdump.py -k ws02.lab.local -no-pass
@@ -174,7 +173,7 @@ If we want to dump the hashes of the target, we can use `secretsdump.py`
 
 # Further exploration of the attack
 
-Now we have performed the attack and have gained what we want to achieve; full administrator level privileges on a remote host, acquired from nothing but network access. This is where I go past what dirkjan detailed in his article and into research of my own. If you want to have a deeper understanding of the attack and what's possible to do with it, keep reading.
+Now we have performed the attack and have gained what we want to achieve; full administrator level privileges on a remote host, acquired from nothing but network access. This is where I go past what @dirkjanm detailed in his article and into research of my own. If you want to have a deeper understanding of the attack and what's possible to do with it, keep reading.
 
 ## A quick look at WMI execution
 
@@ -184,7 +183,7 @@ Let's take a closer look at what goes on during command execution with `wmiexec.
 
 ![](../assets/img/relaydelegation/2019-04-14-15-25-28.png)
 
-Hold on a sec! The `cifs` SPN is only valid for access to file shares isn't it? So how come we can execute WMI queries all of a sudden? Apparently, the `sname` field is not signed or protected by any means, so we can basically change it to the SPN we want. You could look at this as a feature or a bug. Either way, this automatic switch has been implemented in impacket and we can see this behaviour clearly in `wmiexec.py`.
+Hold on a sec! The `cifs` SPN is only valid for access to file shares isn't it? So how come we can execute WMI queries all of a sudden? Apparently, the `sname` field is not signed or protected by any means, so we can basically change it to the SPN we want. You could look at this as a feature or a bug. Either way, this automatic switch has been implemented in Impacket and we can see this behavior clearly in `wmiexec.py`.
 
 Notice how it changes the SPN from CIFs to HOST in an attempt to get a valid SPN for WMI. It doesn't even have to request a new ticket, it just changes the name and gets a valid ticket.
 
@@ -210,7 +209,7 @@ We then use the machine account to execute the two Kerberos concepts `S4U2SELF` 
 
 1. The first part is building AS-REQ with pre-authentication for the machine account. We can do this since we have provided the hash of the account.
 2. We then request a TGT for the machine account from the domain controller.
-3. We then use that TGT to perform `S4U2Self`, and acquire an impersonated service ticket for the DA `lkys@lab.local` to our machine account. It can be quite confusing because here we specifcy the SPN for our machine account, where as in a regular domain scenario we would normally provide the SPN for a service.
+3. We then use that TGT to perform `S4U2Self`, and acquire an impersonated service ticket for the DA `lkys@lab.local` to our machine account. It can be quite confusing because here we specify the SPN for our machine account, where as in a regular domain scenario we would normally provide the SPN for a service.
 4. We now have "proof" in the form of a service ticket that we are the machine account. We then execute `S4U2Proxy` to the remote service, which in this case is the victim machine. So we impersonate `lkys` to the target SPN `cifs/ws02.lab.local` with `s4u2proxy` and get a valid service ticket which allows us to impersonate the domain domain `lkys` on the target machine.
 
 ### Explanation of the above
@@ -219,9 +218,9 @@ What we are really doing here is abusing resource-based constrained delegation. 
 
 Quickly explained though with the figure below as reference. In our example:
 - `Service A` = the machine account `LUJCDPUQ$` which we created
-- Service B = the computer object `WS02` 
+- Service B = the computer object `WS02`
 
-We are enabling resource based constrained delegation on that computer object using the credentials of the machine accounts `WS02$`. Essentially we are giving the the privilege to impersonate the user `lkys` on the `WS02` computer object.
+We are enabling resource-based constrained delegation on that computer object using the credentials of the machine accounts `WS02$`. Essentially we are giving the the privilege to impersonate the user `lkys` on the `WS02` computer object.
 
 ![](https://shenaniganslabs.io/images/TrustedToAuthForDelegationWho/Diagrams/DelegationTypes.png)
 
@@ -232,7 +231,7 @@ Then we have the `S4u2Proxy` request, as explained in step 4 above.
 
 ### Verifying access
 
-The service ticket for cifs on the target as the domain admin has been imported into the cache on our box, and can be displayed with `klist`. We see taht the ticket is valid for the client `lkys@lab.local` on the `cifs` sname on the computer `ws02.lab.local`.
+The service ticket for `cifs` on the target as the domain admin has been imported into the cache on our box, and can be displayed with `klist`. We see taht the ticket is valid for the client `lkys@lab.local` on the `cifs` sname on the computer `ws02.lab.local`.
 
 ![](../assets/img/relaydelegation/2019-04-14-16-18-29.png)
 
@@ -297,7 +296,7 @@ Now start an RDP session with `restrictedadmin` which should in theory use the `
 
 ![](../assets/img/relaydelegation/2019-04-14-17-16-42.png)
 
-But it does not appear to work, and I spent quite a lot of time researching this without getting to the bottom of it. It appears that RDP requires a TGT, which we don't have to request a `termsrv` ticket of its own, and since we simply don't have that it fails to authenticate. I even initiated some dialoge with Benjamin Delpy about this on [Twitter](https://twitter.com/chryzsh/status/1107751511583543296).
+But it does not appear to work, and I spent quite a lot of time researching this without getting to the bottom of it. It appears that RDP requires a TGT, which we don't have to request a `termsrv` ticket of its own, and since we simply don't have that it fails to authenticate. I even initiated some dialogue with Benjamin Delpy about this on [Twitter](https://twitter.com/chryzsh/status/1107751511583543296).
 
 I did also try to find a way to do WMI remote code execution from Windows using a service ticket, but could not figure out any working method. **Ideas on any of the two? Please message me on Twitter.**
 
@@ -322,7 +321,7 @@ First, export the ticket to a kirbi file that can be used with Mimikatz using [K
 
 ![](../assets/img/relaydelegation/2019-04-14-17-20-37.png)
 
-Transfer the ticket over to the Windows host, and import the ticket into the session with mimikatz
+Transfer the ticket over to the Windows host, and import the ticket into the session with mimikatz.
 
 ![](../assets/img/relaydelegation/2019-04-14-17-22-08.png)
 
@@ -340,7 +339,7 @@ It could be LDAPS is simply not configured, which means there is no certificate 
 
 ![](../assets/img/relaydelegation/2019-04-14-13-49-28.png)
 
-If we somehow already have access to a domain user, we can get around this by adding a machine account manually with [Powermad](https://github.com/Kevin-Robertson/Powermad). This works over LDAP without TLS because Windows will use GSSAPI signing and sealing if required, which also encrypts the packets. This is different than LDAPS, because signning and/or sealing is not performed when relaying because the negotiated session key can't be otained. Thanks for this clarification, @elad_shamir and @dirkjanm!
+If we somehow already have access to a domain user, we can get around this by adding a machine account manually with [Powermad](https://github.com/Kevin-Robertson/Powermad). This works over LDAP without TLS because Windows will use GSSAPI signing and sealing if required, which also encrypts the packets. This is different than LDAPS, because signing and/or sealing is not performed when relaying because the negotiated session key can't be obtained. Thanks for this clarification, @elad_shamir and @dirkjanm!
 
     New-MachineAccount -MachineAccount test -Domain lab.local -DomainController dc01.lab.local -Credential chry
 
@@ -378,23 +377,23 @@ I did some experiments with this with another user I created, and while you can 
 
 ### 3 - Can't we capture and relay SMB?
 
-It is not possible to relay credentials from SMB to other protocols. That's simply a protection integrated in Microsoft's implemenation of SMB authentication. dirkan wrote about this in the bottom half of his [PrivExchange article](https://dirkjanm.io/abusing-exchange-one-api-call-away-from-domain-admin/).
+It is not possible to relay credentials from SMB to other protocols. That's simply a protection integrated in Microsoft's implementation of SMB authentication. dirkan wrote about this in the bottom half of his [PrivExchange article](https://dirkjanm.io/abusing-exchange-one-api-call-away-from-domain-admin/).
 
-Update: vulnerabilties were published in 2019 that shows the bypass of NTLM relaying mitigations like SMB signing. Using a combination of these vulnerabilities, it is possible to relay SMB authentication to LDAP. See [@dirkjanm's article](https://dirkjanm.io/exploiting-CVE-2019-1040-relay-vulnerabilities-for-rce-and-domain-admin/) for more details
+Update: vulnerabilities were published in 2019 that shows the bypass of NTLM relaying mitigations like SMB signing. Using a combination of these vulnerabilities, it is possible to relay SMB authentication to LDAP. See [@dirkjanm's article](https://dirkjanm.io/exploiting-CVE-2019-1040-relay-vulnerabilities-for-rce-and-domain-admin/) for more details
 
 ### 4 - Can't we capture and relay HTTP/WebDAV?
 
-While you can relay credentials from HTTP/WebDAV to LDAP through tricks like dropping lnk files, those won't relay the machine account credentials, only user account that accesses them. If you can find another way to get a machine account to contact you, that would work. That is basically what [PrivExchange](https://chryzsh.github.io/exploiting-privexchange/) does. 
+While you can relay credentials from HTTP/WebDAV to LDAP through tricks like dropping lnk files, those won't relay the machine account credentials, only user account that accesses them. If you can find another way to get a machine account to contact you, that would work. That is basically what [PrivExchange](https://chryzsh.github.io/exploiting-privexchange/) does.
 
 ### 5 - Can we do it over IPv4?
 
 Microsoft has patched the protocol fallback from DNS with [MS16-077](https://docs.microsoft.com/en-us/security-updates/securitybulletins/2016/ms16-077) where they removed both WPAD config broadcasts and automatic authentication to proxies. ~~The patch does not apply to IPv6, apparently.~~
 
-Note: I misunderstood this earlier and had a big a-ha moment when i reread the [mitm6 blog](https://blog.fox-it.com/2018/01/11/mitm6-compromising-ipv4-networks-via-ipv6/). The patch indeed applies to IPv6, and the way mitm6 bypasses this patch is by letting the victim connect to the proxy, then prompt it for authentication by replying to it with `HTTP 407 Proxy Authentication` instead of the normal `HTTP 401` code.
+Note: I misunderstood this earlier and had a big a-ha moment when I reread the [mitm6 blog](https://blog.fox-it.com/2018/01/11/mitm6-compromising-ipv4-networks-via-ipv6/). The patch indeed applies to IPv6, and the way mitm6 bypasses this patch is by letting the victim connect to the proxy, then prompt it for authentication by replying to it with `HTTP 407 Proxy Authentication` instead of the normal `HTTP 401` code.
 
 ### 6 - Can we execute it without relaying?
 
-Yes and no. There are a few possible scenarios here depending on your current level of access. The strict requirement for the attack access to an account with an SPN, and being able to configure resource based constrained delegation on a computer object. As demonstrated in this article, both can be achieved by relaying a machine account's credentials. Note that all attacks using these properties still require access to a Linux box on the network.
+Yes and no. There are a few possible scenarios here depending on your current level of access. The strict requirement for the attack access to an account with an SPN, and being able to configure resource-based constrained delegation on a computer object. As demonstrated in this article, both can be achieved by relaying a machine account's credentials. Note that all attacks using these properties still require access to a Linux box on the network.
 
 #### Scenario 0 - Nothing new
 
