@@ -8,7 +8,6 @@ date:   2019-10-02 23:18:00 +0200
 Attacking machines running the Splunk Universal Forwarders to achieve RCE.
 
 ![](../assets/img/splunk-rce/2019-10-03-00-38-52.png)
-![](../assets/img/splunk-rce/emoji.png)
 
 # Overview
 
@@ -34,10 +33,10 @@ Note that there is a temporary consequence of this attack. When you hijack all S
 
 # Prerequisites
 
-- A Linux machine on the same network as the victim host(s)
+- A Linux machine on the same network as the target host(s)
 - The ability to install and configure a Splunk deployment server on said machine
 - A scope that allows ARP spoofing and redirection of Splunk traffic, which can be potentially disruptive
-- Splunk Universal Forwarder running on the victim
+- Splunk Universal Forwarder running on the target
 
 Note that Splunk has no authentication between the Universal Forwarder and
 Deployment Server. Thus, all we need to do is tell clients you are the
@@ -47,15 +46,15 @@ forwarder, which is exactly what we do in this attack.
 
 ## Components of the attack
 
-- `192.168.0.134` - `ws01.lab.local` - The victim host
+- `192.168.0.134` - `ws01.lab.local` - The target host
 - `192.168.0.20` - `kali01` - Attacker host
 - `192.168.0.1` - The default gateway
 
 I found a [useful diagram](http://downloads.jordan2000.com/splunk/Splunk-Common-Network-Ports-ver1.6.png) that displays some of the Splunk components and what ports they use for communication. Most of it is beyond the scope of this simple demo, but it's worth taking a look at it to get familiar with Splunk infrastructure.
 
-## Preparing the victim
+## Preparing the target
 
-In a real scenario you will not have access to the victim (duh). I included this section so you can replicate the attack in your lab.
+In a real scenario you will not have access to the target (duh). I included this section so you can replicate the attack in your lab.
 
 Install the Splunk Universal Forwarder (UF) with [Choco](https://chocolatey.org/)
 
@@ -90,7 +89,7 @@ Once the server is installed, start it
 
 ## ARP spoofing
 
-We need to ARP spoof the victim to be able to say we are the deployment server. However, we are not always lucky enough to be in the same network as the real Deployment Server. Hence, we need to find out where it is, and spoof it. We do that by spoofing the default gateway for our victim, consequently routing everything through us.
+We need to ARP spoof the target to be able to say we are the deployment server. However, we are not always lucky enough to be in the same network as the real Deployment Server. Hence, we need to find out where it is, and spoof it. We do that by spoofing the default gateway for our target, consequently routing everything through us.
 
 First enable port forwarding on the attacking host
 
@@ -100,7 +99,7 @@ First enable port forwarding on the attacking host
 
 ![](../assets/img/splunk-rce/2019-10-03-01-01-39.png)
 
-Open two terminals and execute `arpspoof` to tell the victim that we are the default gateway and the gateway that we are the victim. This way, all traffic to and from the victim will be forwarded through our attacker host.
+Open two terminals and execute `arpspoof` to tell the target that we are the default gateway and the gateway that we are the target. This way, all traffic to and from the target will be forwarded through our attacker host.
 
     arpspoof -i eth0 -t 192.168.0.134 192.168.0.1
     arpspoof -i eth0 -t 192.168.0.1 192.168.0.134
@@ -113,7 +112,7 @@ Instantly upon execution, ARP replies are coming in.
 
 ## Finding the real Deployment Server
 
-If you are lucky, the DS is in the same network as your attacker host and victim. If it is you can just ARP spoof that server directly. However, if the DS is in a different network, you need to find out where the DS is.
+If you are lucky, the DS is in the same network as your attacker host and target. If it is you can just ARP spoof that server directly. However, if the DS is in a different network, you need to find out where the DS is.
 
 Note: when I did this I had both SSH and RDP going on to the boxes, so I filtered those and ARP requests, and focus on traffic to and from my target. We know that UFs communicate outbound on `8089` so we can filter on that.
 
@@ -145,7 +144,7 @@ I also played with DNS spoofing to simply hijack the DNS query for the Deploymen
 
 ## Preparing the deployment package
 
-We are going to prepare a Splunk app that will be deployed to the victim. We don't care for implementing this ourselves when numerous projects are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a Powershell-script, which executes a reverse shell.
+We are going to prepare a Splunk app that will be deployed to the target. We don't care for implementing this ourselves when numerous projects are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a Powershell-script, which executes a reverse shell.
 
 _Note that such a shell might trigger anti-malware alert and get blocked. I would suggest doing something that could be considered more opsec safe, like adding a local user and adding it to the local administrators group._
 
@@ -212,7 +211,7 @@ Click `Save`
 
 ![](../assets/img/splunk-rce/2019-10-03-00-30-42.png)
 
-Click `Edit` on the App and in that new view, ensure `Restart Splunkd` is checked. If not, the splunk deamon on the victim won't restart and execute it's new app. Once done, click `Save`.
+Click `Edit` on the App and in that new view, ensure `Restart Splunkd` is checked. If not, the splunk deamon on the target won't restart and execute it's new app. Once done, click `Save`.
 
 ![](../assets/img/splunk-rce/2019-10-03-22-37-16.png)
 
@@ -242,13 +241,13 @@ And there it is! Our beloved SYSTEM shell which we obtained from nothing but net
 
 ### Client polling
 
-Polling for new apps will always be initiated by the client, so we simply have to wait. If we are impatient and just want to simulate the attack, we can log on to the victim host and force a restart of the UF.
+Polling for new apps will always be initiated by the client, so we simply have to wait. If we are impatient and just want to simulate the attack, we can log on to the target host and force a restart of the UF.
 
     C:\Program Files\SplunkUniversalForwarder\bin> .\splunk.exe restart
 
 ![](../assets/img/splunk-rce/2019-10-03-00-13-13.png)
 
-After the restart we monitor using `tcpdump`, where we should see the victim start connecting to our fake DS, thus installing the deployed app and execute the payload.
+After the restart we monitor using `tcpdump`, where we should see the target start connecting to our fake DS, thus installing the deployed app and execute the payload.
 
 Note that the location of the deployed apps on the Windows endpoint is `C:\Program Files\SplunkUniversalForwarder\etc\apps`. You should see your malicious app here.
 
@@ -266,7 +265,11 @@ Note that the cost of implementing this in large enterprise networks may not ben
 
 ## Splunk certificate authentication
 
-In the environments I have tested, the UF has not been configured to enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated in this post works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`.
+In all the Splunk environments I have tested, the UF has not been configured to enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated in this post works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`.
+
+Update: I discovered that Splunk even warns about the issue in the splunkd log on the UF.
+
+![](../assets/img/splunk-rce/2020-02-04-20-29-03.png)
 
 ## Low privilege forwarder
 
