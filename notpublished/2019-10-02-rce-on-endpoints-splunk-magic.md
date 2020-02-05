@@ -17,6 +17,14 @@ However, a quick port scan reveals port 8089 exposed on a couple of hosts. More 
 
 I decided to configure Splunk in my lab to find out if it is possible to achieve RCE on any host with the Splunk Universal Forwarder installed, given access to the same network. Spoiler alert: the answer is yes.
 
+## The issue
+
+The underlying issue here is that the Splunk Universal Forwarder (UF) does not by default enforce any authentication of the Splunk Deployment Server (DS). In a default install there is a default TLS certificate present, which is not enforced. Because the UF does not verify the DS, it will accept any DS. This means this communication becomes extremely vulnerable to man-in-the-middle attacks, as there is basically no authentication between the two components.
+
+I discovered that Splunk even warns about the issue in the splunkd log on the UF.
+
+![](../assets/img/splunk-rce/2020-02-04-20-29-03.png)
+
 ## What do we achieve from this attack?
 
 - Remote Code Execution as `SYSTEM` on any endpoint with Splunk Universal Forwarder running.
@@ -266,10 +274,6 @@ Note that the cost of implementing this in large enterprise networks may not ben
 ## Splunk certificate authentication
 
 In all the Splunk environments I have tested, the UF has not been configured to enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated in this post works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`.
-
-Update: I discovered that Splunk even warns about the issue in the splunkd log on the UF.
-
-![](../assets/img/splunk-rce/2020-02-04-20-29-03.png)
 
 ## Low privilege forwarder
 
