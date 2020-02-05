@@ -152,7 +152,7 @@ I also played with DNS spoofing to simply hijack the DNS query for the Deploymen
 
 ## Preparing the deployment package
 
-We are going to prepare a Splunk app that will be deployed to the target. We don't care for implementing this ourselves when numerous projects are easily available on Github. We chose the repo [reverse_shell_splunk](git clone https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a Powershell-script, which executes a reverse shell.
+We are going to prepare a Splunk app that will be deployed to the target. We don't care for implementing this ourselves when numerous projects are easily available on Github. We chose the repo [reverse_shell_splunk](https://github.com/vartai-security/reverse_shell_splunk) for the job. This app will simply run a bat file that runs a Powershell-script, which executes a reverse shell.
 
 _Note that such a shell might trigger anti-malware alert and get blocked. I would suggest doing something that could be considered more opsec safe, like adding a local user and adding it to the local administrators group._
 
@@ -235,13 +235,13 @@ Specify the client in the whitelisting , which is our target and click Save.
 
 ![](../assets/img/splunk-rce/2019-10-03-00-31-43.png)
 
-It should deploy the App fairly quickly and give us some feedback when it has.
+Next time the client phones home, the DS should deploy the new App fairly quickly, and give us some feedback when it has.
 
 ![](../assets/img/splunk-rce/2019-10-03-00-32-28.png)
 
 ## Profit
 
-And there it is! Our beloved SYSTEM shell which we obtained from nothing but network access and some clever Splunk magic. Do a root dance if you ever get here!
+And there it is! Our beloved SYSTEM shell which we obtained from nothing but network access and some clever Splunk trickery.
 
 ![](../assets/img/splunk-rce/2019-10-03-00-01-13.png)
 
@@ -261,6 +261,13 @@ Note that the location of the deployed apps on the Windows endpoint is `C:\Progr
 
 ![](../assets/img/splunk-rce/2019-10-03-01-16-26.png)
 
+### Nothing gets executed
+
+Usually, if nothing appears to get executed the payload is caught by anti-malware. I would suggest an opsec safe payload.
+
+The other alternative is that you messed up the path structure of the app. It should look something like this:
+![](../assets/img/splunk-rce/2020-02-05-08-59-10.png)
+
 # Mitigations
 
 As this attack consists of several components, there are several mitigations that apply to it.
@@ -269,11 +276,27 @@ As this attack consists of several components, there are several mitigations tha
 
 ARP spoofing has been and still is possible to do in most broadcast domains. Dynamic ARP inspection (DAI) can prevent this by intercepting all ARP requests and responses. Each intercepted packet is verified for valid MAC address to IP bindings. The best information on this I could find was [some Cisco documentation](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst4500/12-2/25ew/configuration/guide/conf/dynarp.html). There are also a vast range of [third party solutions](https://en.wikipedia.org/wiki/ARP_spoofing?oldformat=true#Defense) available.
 
-Note that the cost of implementing this in large enterprise networks may not benefit the risk.
+Note that the cost of implementing this in large enterprise networks may not benefit the risk. You could also make the argument that we should be able to trust the protocols like TLS to not force us to apply mitigations at this layer.
 
 ## Splunk certificate authentication
 
 In all the Splunk environments I have tested, the UF has not been configured to enforce the TLS certificate for the Deployment Server, which is the primary reason the attack demonstrated in this post works. Because the UF does not verify the DS, it will accept any DS. To mitigate this, [configure Splunk forwarding to use your own certificates](https://docs.splunk.com/Documentation/Splunk/latest/Security/ConfigureSplunkforwardingtousesignedcertificates). Ensure the certificate is enforced in [deploymentclient.conf](https://docs.splunk.com/Documentation/Splunk/latest/Admin/Deploymentclientconf). This setting is `sslVerifyServerCert = <bool>`.
+
+It is possible to deploy the certificate with a Splunk app. If you can guarantee the integrity of the initial deployment of an app, deploying certificates that way is probably one of the easiest ways. It will be almost like an initial handshake for the authentication between UF and DS.
+
+With this said, ensuring clients suddenly don't have certs that expire can be a bit of a maintenance nightmare.
+
+## IPsec
+
+[@bravo2day](https://twitter.com/bravo2day) and [@silkeslips](https://twitter.com/silkeslips) started looking into mitigating this vulnerability by tunneling the Deployment Server traffic through an IPsec tunnel. Using the Windows firewall it is apparently possible to make the UF connect to the same address, but using a connection security rule to establish an IPsec tunnel for traffic to destination port 8089. Note that since both Cluster Master and Deployment Server traffic is destination port 8089, this will make both services go through the tunnel. This solution might be more efficient than implementing PKI for an enterprise. I think it's a very creative solution to mitigate this vulnerability.
+
+## Authorization of UF
+
+I found [another article](https://www.duanewaddle.com/splunk-pass4symmkey-for-deployment-client-deployment-server/) describing possible mitigations for this issue. While it did identify a way to make sure only authorized UFs are allowed to connect to the DS, it did not identify any workaround or mitigation for the authentication issue.
+
+## Using other systems for deploying apps
+
+It could be possible to not use a Deployment Server at all, and rely on other systems to deploy apps, like SCCM or perhaps even configuration management tools like Ansible, Puppet, etc.
 
 ## Low privilege forwarder
 
@@ -285,9 +308,7 @@ The following documentation shows how to secure and harden Splunk installations
 
 * [How to secure and harden your Splunk software installation](https://docs.splunk.com/Documentation/Splunk/latest/Security/Hardeningstandards)
 
-## IPsec
 
-[@bravo2day](https://twitter.com/bravo2day) and [@silkeslips](https://twitter.com/silkeslips) started looking into mitigating this vulnerability by tunneling the Deployment Server traffic through an IPsec tunnel. Using the Windows firewall it is apparently possible to make the UF connect to the same address, but using a connection security rule to establish an IPsec tunnel for traffic to destination port 8089. Note that since both Cluster Master and Deployment Server traffic is destination port 8089, this will make both services go through the tunnel. This solution might be more efficient than implementing PKI for an enterprise. I think it's a very creative solution to mitigate this vulnerability.
 
 # Credits
 
